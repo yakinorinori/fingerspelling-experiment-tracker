@@ -4,3 +4,7 @@ __pycache__/
 .venv/
 venv/
 .ipynb_checkpoints/
+# 単体文字動画の認識（マシンごとの設定・骨格のキャッシュ・書き出したCSV）
+data/single_char_settings.json
+data/single_char_landmarks/
+data/single_char_results.csv

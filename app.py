@@ -8,6 +8,7 @@
 - 記録した実験は後からすべて編集可能（SQLite保存）
 
 起動:  python app.py  →  http://127.0.0.1:5002
+単体文字動画の認識:  http://127.0.0.1:5002/single （singlechar.py）
 """
 import json
 import sqlite3
@@ -16,11 +17,14 @@ from pathlib import Path
 
 from flask import Flask, g, jsonify, render_template, request
 
+from singlechar import bp as singlechar_bp
+
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / 'data' / 'experiments.db'
 
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False
+app.register_blueprint(singlechar_bp)   # 単体文字動画で実験5を行う画面（/single）
 
 
 # ---------------------------------------------------------------- DB
