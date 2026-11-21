@@ -21,6 +21,7 @@
   .badge.完了 { background: #d4edda; color: #1b6e2e; }
   .newbtn { width: 100%; padding: 8px; margin-top: 14px; border: 1px dashed #4a7bd0; color: #4a7bd0; background: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
   .newbtn:hover { background: #eef3fb; }
+  .linkbtn { display: block; text-align: center; text-decoration: none; margin-top: 8px; border-style: solid; }
 
   /* ---- 右: 詳細 ---- */
   .main { flex: 1; overflow-y: auto; padding: 22px 28px; }
@@ -70,6 +71,7 @@
     <h1>🧪 実験記録</h1>
     <div id="expList"></div>
     <button class="newbtn" onclick="createExperiment()">＋ 新規実験を追加</button>
+    <a class="newbtn linkbtn" href="/single">🎬 単体文字動画で認識（実験5）</a>
   </div>
   <div class="main" id="main">
     <div class="placeholder">左の一覧から実験を選択してください</div>
