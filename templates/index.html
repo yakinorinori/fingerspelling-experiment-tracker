@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>🧪 実験記録 - 指文字認識研究</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; background: #f4f6f8; color: #222; }
+  .layout { display: flex; height: 100vh; }
+
+  /* ---- 左: 実験一覧 ---- */
+  .sidebar { width: 320px; min-width: 320px; background: #fff; border-right: 1px solid #ddd; overflow-y: auto; padding: 14px; }
+  .sidebar h1 { font-size: 17px; margin-bottom: 12px; }
+  .cat { font-size: 12px; font-weight: bold; color: #667; margin: 12px 0 4px; }
+  .exp-item { padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; margin-bottom: 3px; border: 1px solid transparent; display: flex; justify-content: space-between; gap: 6px; align-items: center; }
+  .exp-item:hover { background: #eef3fb; }
+  .exp-item.active { background: #e3edfb; border-color: #4a7bd0; }
+  .badge { font-size: 10px; padding: 2px 6px; border-radius: 8px; white-space: nowrap; }
+  .badge.予定 { background: #eee; color: #666; }
+  .badge.実施中 { background: #fff3cd; color: #8a6d00; }
+  .badge.完了 { background: #d4edda; color: #1b6e2e; }
+  .newbtn { width: 100%; padding: 8px; margin-top: 14px; border: 1px dashed #4a7bd0; color: #4a7bd0; background: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .newbtn:hover { background: #eef3fb; }
+
+  /* ---- 右: 詳細 ---- */
+  .main { flex: 1; overflow-y: auto; padding: 22px 28px; }
+  .placeholder { color: #999; margin-top: 60px; text-align: center; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 11px; color: #667; margin-bottom: 3px; }
+  input[type=text], textarea, select { width: 100%; padding: 7px 9px; border: 1px solid #ccc; border-radius: 5px; font-size: 13px; font-family: inherit; }
+  textarea { resize: vertical; min-height: 48px; }
+  .meta-grid { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 10px; }
+  h2 input { font-size: 18px; font-weight: bold; border: none; background: transparent; width: 100%; padding: 4px 0; }
+  h2 input:focus { outline: 1px solid #4a7bd0; border-radius: 4px; }
+
+  .section-title { font-size: 13px; font-weight: bold; margin: 18px 0 8px; color: #334; }
+
+  /* 条件（列）設定 */
+  .col-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: flex; align-items: center; gap: 5px; background: #fff; border: 1px solid #bbb; border-radius: 14px; padding: 3px 9px; font-size: 12px; }
+  .chip input[type=text] { border: none; width: 80px; padding: 1px; font-size: 12px; }
+  .chip input[type=text]:focus { outline: none; }
+  .chip .cnt { font-size: 10px; color: #888; cursor: pointer; user-select: none; }
+  .chip .cnt.on { color: #1b6e2e; font-weight: bold; }
+  .chip .del { cursor: pointer; color: #c66; font-weight: bold; }
+  .addcol { border: 1px dashed #999; background: none; border-radius: 14px; padding: 3px 10px; font-size: 12px; cursor: pointer; color: #555; }
+
+  /* 結果テーブル */
+  table { border-collapse: collapse; background: #fff; font-size: 13px; }
+  th, td { border: 1px solid #ccc; padding: 5px 8px; }
+  th { background: #eef1f5; font-weight: 600; white-space: nowrap; }
+  td input { border: none; width: 90px; font-size: 13px; padding: 3px; background: transparent; }
+  td input:focus { outline: 1px solid #4a7bd0; border-radius: 3px; }
+  td.label-cell input { width: 140px; font-weight: 600; }
+  td.calc { background: #f6fbf6; color: #1b6e2e; text-align: right; white-space: nowrap; }
+  .rowdel { cursor: pointer; color: #c66; border: none; background: none; font-weight: bold; }
+
+  .btnrow { margin: 14px 0; display: flex; gap: 8px; flex-wrap: wrap; }
+  button.act { padding: 7px 14px; border: 1px solid #4a7bd0; background: #4a7bd0; color: #fff; border-radius: 5px; cursor: pointer; font-size: 13px; }
+  button.act.secondary { background: #fff; color: #4a7bd0; }
+  button.act.danger { border-color: #c0392b; background: #fff; color: #c0392b; }
+  button.act:hover { opacity: .85; }
+  #saveStatus { font-size: 12px; color: #1b6e2e; align-self: center; }
+  .ts { font-size: 11px; color: #999; margin-top: 16px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <div class="sidebar">
+    <h1>🧪 実験記録</h1>
+    <div id="expList"></div>
+    <button class="newbtn" onclick="createExperiment()">＋ 新規実験を追加</button>
+  </div>
+  <div class="main" id="main">
+    <div class="placeholder">左の一覧から実験を選択してください</div>
+  </div>
+</div>
+
+<script>
+let current = null;   // 現在編集中の実験（フル）
+let listCache = [];
+
+/* ---------------- 一覧 ---------------- */
+async function loadList(selectId) {
+  const res = await fetch('/api/experiments');
+  listCache = await res.json();
+  const byCat = {};
+  listCache.forEach(e => { (byCat[e.category || 'その他'] ||= []).push(e); });
+  let html = '';
+  for (const cat of Object.keys(byCat).sort()) {
+    html += `<div class="cat">${esc(cat)}</div>`;
+    for (const e of byCat[cat]) {
+      html += `<div class="exp-item ${current && current.id === e.id ? 'active' : ''}" onclick="openExperiment(${e.id})">
+        <span>${esc(e.title)}</span><span class="badge ${e.status}">${e.status}</span></div>`;
+    }
+  }
+  document.getElementById('expList').innerHTML = html;
+  if (selectId) openExperiment(selectId);
+}
+
+async function createExperiment() {
+  const res = await fetch('/api/experiments', {method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({title: '新しい実験', rows: [{label: '項目1', values: ['', '']}]})});
+  const e = await res.json();
+  await loadList(e.id);
+}
+
+/* ---------------- 詳細 ---------------- */
+async function openExperiment(id) {
+  const res = await fetch('/api/experiments/' + id);
+  current = await res.json();
+  render();
+  loadList();
+}
+
+function render() {
+  const e = current;
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <h2><input id="f_title" value="${esc(e.title)}" onchange="mark()"></h2>
+    <div class="meta-grid">
+      <div class="field"><label>カテゴリ</label><input type="text" id="f_category" value="${esc(e.category)}" onchange="mark()"></div>
+      <div class="field"><label>状態</label>
+        <select id="f_status" onchange="mark()">
+          ${['予定','実施中','完了'].map(s => `<option ${s===e.status?'selected':''}>${s}</option>`).join('')}
+        </select></div>
+      <div class="field"><label>クラス数</label><input type="text" id="f_class_count" value="${e.class_count ?? ''}" onchange="mark()"></div>
+      <div class="field"><label>&nbsp;</label><button class="act danger" onclick="removeExperiment()">実験を削除</button></div>
+    </div>
+    <div class="field"><label>説明（条件・データセットなど）</label>
+      <textarea id="f_description" onchange="mark()">${esc(e.description)}</textarea></div>
+
+    <div class="section-title">条件（列）設定 — ✓=認識率の分母に含める</div>
+    <div class="col-chips" id="colChips"></div>
+
+    <div class="section-title">結果</div>
+    <div id="tableWrap"></div>
+    <div class="btnrow">
+      <button class="act secondary" onclick="addRow()">＋ 行を追加</button>
+      <button class="act secondary" onclick="copyTable('tsv')">📋 TSVコピー(Excel用)</button>
+      <button class="act secondary" onclick="copyTable('md')">📋 Markdownコピー</button>
+      <button class="act" onclick="save()">💾 保存</button>
+      <span id="saveStatus"></span>
+    </div>
+
+    <div class="field"><label>メモ・考察</label>
+      <textarea id="f_notes" rows="4" onchange="mark()">${esc(e.notes)}</textarea></div>
+    <div class="ts">作成: ${e.created_at} ／ 更新: ${e.updated_at}</div>
+  `;
+  renderCols();
+  renderTable();
+}
+
+/* ---- 列（条件）チップ ---- */
+function renderCols() {
+  const wrap = document.getElementById('colChips');
+  wrap.innerHTML = '';
+  current.columns.forEach((c, i) => {
+    const chip = document.createElement('div');
+    chip.className = 'chip';
+    chip.innerHTML = `
+      <input type="text" value="${esc(c.name)}" onchange="current.columns[${i}].name=this.value; renderTable(); mark()">
+      <span class="cnt ${c.count ? 'on' : ''}" title="認識率の分母に含める" onclick="toggleCount(${i})">✓</span>
+      <span class="del" onclick="delCol(${i})">×</span>`;
+    wrap.appendChild(chip);
+  });
+  const add = document.createElement('button');
+  add.className = 'addcol';
+  add.textContent = '＋ 条件を追加（例: 未検出）';
+  add.onclick = () => {
+    current.columns.push({name: '未検出', count: true});
+    current.rows.forEach(r => r.values.push(''));
+    renderCols(); renderTable(); mark();
+  };
+  wrap.appendChild(add);
+}
+function toggleCount(i) { current.columns[i].count = !current.columns[i].count; renderCols(); renderTable(); mark(); }
+function delCol(i) {
+  if (!confirm(`列「${current.columns[i].name}」を削除しますか？`)) return;
+  current.columns.splice(i, 1);
+  current.rows.forEach(r => r.values.splice(i, 1));
+  renderCols(); renderTable(); mark();
+}
+
+/* ---- 結果テーブル ---- */
+function hasRate() {
+  return current.columns.some(c => c.name === '正認識') && current.columns.some(c => c.count);
+}
+function rowRate(r) {
+  let correct = null, denom = 0;
+  current.columns.forEach((c, i) => {
+    const v = parseFloat(r.values[i]);
+    if (c.count && !isNaN(v)) denom += v;
+    if (c.name === '正認識' && !isNaN(v)) correct = v;
+  });
+  if (correct === null || denom === 0) return '';
+  return (100 * correct / denom).toFixed(1) + '%';
+}
+function renderTable() {
+  const e = current;
+  let html = '<table><tr><th>項目</th>';
+  e.columns.forEach(c => html += `<th>${esc(c.name)}</th>`);
+  if (hasRate()) html += '<th>認識率</th>';
+  html += '<th></th></tr>';
+  e.rows.forEach((r, ri) => {
+    html += `<tr><td class="label-cell"><input value="${esc(r.label)}" onchange="current.rows[${ri}].label=this.value; mark()"></td>`;
+    r.values.forEach((v, ci) => {
+      html += `<td><input value="${esc(v)}" onchange="current.rows[${ri}].values[${ci}]=this.value; renderTable(); mark()"></td>`;
+    });
+    if (hasRate()) html += `<td class="calc">${rowRate(r)}</td>`;
+    html += `<td><button class="rowdel" onclick="delRow(${ri})">×</button></td></tr>`;
+  });
+  // 合計行
+  if (e.rows.length > 1 && e.columns.some(c => c.count)) {
+    html += '<tr><td class="label-cell"><b>合計</b></td>';
+    let totCorrect = 0, totDenom = 0;
+    e.columns.forEach((c, ci) => {
+      let s = 0, any = false;
+      e.rows.forEach(r => { const v = parseFloat(r.values[ci]); if (!isNaN(v)) { s += v; any = true; } });
+      html += `<td style="text-align:right">${any ? s : ''}</td>`;
+      if (c.count && any) totDenom += s;
+      if (c.name === '正認識' && any) totCorrect = s;
+    });
+    if (hasRate()) html += `<td class="calc">${totDenom ? (100*totCorrect/totDenom).toFixed(1)+'%' : ''}</td>`;
+    html += '<td></td></tr>';
+  }
+  html += '</table>';
+  document.getElementById('tableWrap').innerHTML = html;
+}
+function addRow() {
+  current.rows.push({label: '', values: current.columns.map(() => '')});
+  renderTable(); mark();
+}
+function delRow(i) { current.rows.splice(i, 1); renderTable(); mark(); }
+
+/* ---- コピー ---- */
+function tableData() {
+  const headers = ['項目', ...current.columns.map(c => c.name)];
+  if (hasRate()) headers.push('認識率');
+  const rows = current.rows.map(r => {
+    const vals = [r.label, ...r.values];
+    if (hasRate()) vals.push(rowRate(r));
+    return vals;
+  });
+  return {headers, rows};
+}
+function copyTable(fmt) {
+  const {headers, rows} = tableData();
+  let text;
+  if (fmt === 'tsv') {
+    text = [headers.join('\t'), ...rows.map(r => r.join('\t'))].join('\n');
+  } else {
+    text = '| ' + headers.join(' | ') + ' |\n'
+         + '|' + headers.map(() => '---').join('|') + '|\n'
+         + rows.map(r => '| ' + r.join(' | ') + ' |').join('\n');
+  }
+  navigator.clipboard.writeText(text).then(() => flash('コピーしました'));
+}
+
+/* ---- 保存 ---- */
+function mark() { document.getElementById('saveStatus').textContent = '未保存の変更あり'; }
+async function save() {
+  const body = {
+    title: val('f_title'), category: val('f_category'), status: val('f_status'),
+    class_count: parseInt(val('f_class_count')) || null,
+    description: val('f_description'), notes: val('f_notes'),
+    columns: current.columns, rows: current.rows,
+  };
+  const res = await fetch('/api/experiments/' + current.id, {
+    method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  current = await res.json();
+  flash('保存しました ✓');
+  loadList();
+}
+async function removeExperiment() {
+  if (!confirm(`実験「${current.title}」を削除しますか？`)) return;
+  await fetch('/api/experiments/' + current.id, {method: 'DELETE'});
+  current = null;
+  document.getElementById('main').innerHTML = '<div class="placeholder">左の一覧から実験を選択してください</div>';
+  loadList();
+}
+
+function val(id) { return document.getElementById(id).value; }
+function flash(msg) {
+  const el = document.getElementById('saveStatus');
+  el.textContent = msg;
+  setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 2500);
+}
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+loadList();
+</script>
+</body>
+</html>
