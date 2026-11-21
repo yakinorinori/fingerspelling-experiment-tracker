@@ -50,12 +50,25 @@ _models = {}                  # 読み込んだモデル {パス: (更新時刻,
 
 
 # ---------------------------------------------------------------- 設定
+def find_character_repo():
+    """
+    fingerspelling-character を探す。このアプリのフォルダから上へ4階層まで、
+    「<親>/fingerspelling-character」と「<親>/Fingerspelling-repos/fingerspelling-character」を順に見る
+    """
+    for parent in list(BASE_DIR.parents)[:4]:
+        for cand in (parent / 'fingerspelling-character', parent / 'Fingerspelling-repos' / 'fingerspelling-character'):
+            if (cand / 'recognize_video.py').is_file():
+                return cand
+    return BASE_DIR.parent / 'fingerspelling-character'
+
+
 def default_settings():
-    repos = BASE_DIR.parent                                   # Fingerspelling-repos/
-    char_repo = repos / 'fingerspelling-character'
+    char_repo = find_character_repo()
     models = char_repo / 'results' / 'models'
+    # fingerspelling-character と同じく python_画像処理/Fingerspelling/Video を使う
+    video = char_repo.parent.parent / 'Fingerspelling' / 'Video' / '単語分割' / '単体文字'
     return {
-        'video_dir': str(repos.parent / 'Fingerspelling' / 'Video' / '単語分割' / '単体文字'),
+        'video_dir': str(video),
         'character_repo': str(char_repo),
         'static_model': str(models / 'svm_H3+O.joblib'),
         'dynamic_model': str(models / 'dynamic_transformer_H3+O+M.pt'),

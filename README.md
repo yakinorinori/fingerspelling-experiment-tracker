@@ -42,8 +42,8 @@
 
 | 項目 | 既定値 |
 |---|---|
-| 単体文字フォルダ | `../../Fingerspelling/Video/単語分割/単体文字` |
-| fingerspelling-character | `../fingerspelling-character` |
+| fingerspelling-character | このアプリのフォルダから上へ4階層まで探す（`fingerspelling-character` か `Fingerspelling-repos/fingerspelling-character`） |
+| 単体文字フォルダ | fingerspelling-character の2つ上の `Fingerspelling/Video/単語分割/単体文字` |
 | 静止・動作・統一モデル | `fingerspelling-character/results/models/` の `svm_H3+O.joblib`、`dynamic_transformer_H3+O+M.pt`、`unified_transformer_S+H3+O+M.pt` |
 
 ### 起動（fingerspelling-character と同じ環境で）
