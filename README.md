@@ -38,6 +38,16 @@
 - 認識には fingerspelling-character のコード（右手の判定・特徴量・`recognize_video.py` と同じ計算）とモデルを使う
 - キー操作：Space=もう一度再生、← →=前・次の動画、1〜3=静止・動作・統一の判定を自動に戻す
 
+### 複数のフォルダをまとめる
+
+設定で単体文字フォルダを複数登録できる（人ごと・撮影日ごとのフォルダなど）。
+
+- 一覧の上でフォルダを選ぶと、そのフォルダだけを表示・集計する（「すべてのフォルダ」で合計）
+- 集計の下に、フォルダごとの認識率も出る
+- 「実験5の表に反映」は、登録したすべてのフォルダを合わせた結果を書き込む
+- 動画は「フォルダの呼び名/フォルダからの相対パス」で記録する（正解CSV・認識結果とも）。一度付けた呼び名は変えない
+- 以前の形式（フォルダ1つ・相対パスのみ）の記録は、最初の起動時に「呼び名/相対パス」に自動で移す
+
 ### 設定（画面左下の ⚙）
 
 フォルダとモデルの場所を指定する（`data/single_char_settings.json` に保存。パスが正しいと ✓ が付く）。
@@ -45,7 +55,7 @@
 | 項目 | 既定値 |
 |---|---|
 | fingerspelling-character | このアプリのフォルダから上へ4階層まで探す（`fingerspelling-character` か `Fingerspelling-repos/fingerspelling-character`） |
-| 単体文字フォルダ | fingerspelling-character の2つ上の `Fingerspelling/Video/単語分割/単体文字` |
+| 単体文字フォルダ（複数可） | fingerspelling-character の2つ上の `Fingerspelling/Video/単語分割/単体文字` |
 | 静止・動作・統一モデル | `fingerspelling-character/results/models/` の `svm_H3+O.joblib`、`dynamic_transformer_H3+O+M.pt`、`unified_transformer_S+H3+O+M.pt` |
 
 ### 起動（fingerspelling-character と同じ環境で）

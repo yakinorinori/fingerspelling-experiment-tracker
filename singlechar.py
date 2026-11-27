@@ -69,7 +69,8 @@ def default_settings():
     # fingerspelling-character と同じく python_画像処理/Fingerspelling/Video を使う
     video = char_repo.parent.parent / 'Fingerspelling' / 'Video' / '単語分割' / '単体文字'
     return {
-        'video_dir': str(video),
+        'video_dir': str(video),          # 古い設定（フォルダ1つ）。video_dirs に移す
+        'video_dirs': [],                 # [{"name": "山口", "path": ".../単体文字"}, ...]  複数のフォルダをまとめて扱う
         'character_repo': str(char_repo),
         'static_model': str(models / 'svm_H3+O.joblib'),
         'dynamic_model': str(models / 'dynamic_transformer_H3+O+M.pt'),
@@ -79,14 +80,55 @@ def default_settings():
     }
 
 
+def unique_name(path, used):
+    """フォルダの呼び名（動画の名前の先頭に付ける）。同じ名前があれば親フォルダの名前を前に付ける"""
+    p = Path(path).expanduser()
+    name = p.name or 'videos'
+    if name in used:
+        name = f'{p.parent.name}_{name}'
+    base, i = name, 2
+    while name in used:
+        name = f'{base}{i}'
+        i += 1
+    return name.replace('/', '_')
+
+
 def load_settings():
     s = default_settings()
+    saved = {}
     if SETTINGS_PATH.exists():
         try:
-            s.update(json.loads(SETTINGS_PATH.read_text(encoding='utf-8')))
+            saved = json.loads(SETTINGS_PATH.read_text(encoding='utf-8'))
         except (OSError, ValueError):
-            pass
+            saved = {}
+    s.update(saved)
+    if not s.get('video_dirs'):
+        s['video_dirs'] = [{'name': unique_name(s['video_dir'], set()), 'path': s['video_dir']}]
+    if saved.get('key_version') != 2:
+        migrate_keys(s)
     return s
+
+
+def migrate_keys(s):
+    """
+    以前は動画を「単体文字フォルダからの相対パス」で記録していた。
+    複数のフォルダを扱うため「フォルダの呼び名/相対パス」に変える（正解CSVと認識結果の両方。1回だけ行う）
+    """
+    prefix = s['video_dirs'][0]['name'] + '/'
+    if LABELS_CSV.exists():
+        with open(LABELS_CSV, encoding='utf-8-sig', newline='') as f:
+            rows = list(csv.DictReader(f))
+        with open(LABELS_CSV, 'w', encoding='utf-8-sig', newline='') as f:
+            w = csv.writer(f)
+            w.writerow(['video', 'label', 'updated_at'])
+            for r in rows:
+                w.writerow([prefix + r['video'], r.get('label', ''), r.get('updated_at', '')])
+    if DB_PATH.exists():
+        with db() as con:
+            con.execute('UPDATE single_char_results SET video = ? || video', (prefix,))
+    s['key_version'] = 2
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    SETTINGS_PATH.write_text(json.dumps(s, ensure_ascii=False, indent=2), encoding='utf-8')
 
 
 def save_settings(new):
@@ -94,6 +136,19 @@ def save_settings(new):
     for k in default_settings():
         if k in new:
             s[k] = new[k]
+    if 'video_dirs' in new:                     # 呼び名を整える（空なら自動、重複しないように）
+        used, dirs = set(), []
+        for d in new['video_dirs']:
+            path = str(d.get('path', '')).strip()
+            if not path:
+                continue
+            name = str(d.get('name', '')).strip().replace('/', '_') or unique_name(path, used)
+            if name in used:
+                name = unique_name(path, used)
+            used.add(name)
+            dirs.append({'name': name, 'path': path})
+        s['video_dirs'] = dirs
+    s['key_version'] = 2
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     SETTINGS_PATH.write_text(json.dumps(s, ensure_ascii=False, indent=2), encoding='utf-8')
     _models.clear()
@@ -102,30 +157,42 @@ def save_settings(new):
 
 def check_settings(s):
     """設定したパスが存在するか（画面に表示する）"""
-    out = {}
-    for k in ['video_dir', 'character_repo']:
-        out[k] = Path(s[k]).expanduser().is_dir()
+    out = {'character_repo': Path(s['character_repo']).expanduser().is_dir(),
+           'video_dirs': [Path(d['path']).expanduser().is_dir() for d in s['video_dirs']]}
+    out['video_dir'] = any(out['video_dirs'])
     for m in MODEL_KINDS:
         out[m['setting']] = Path(s[m['setting']]).expanduser().is_file()
     return out
 
 
 # ---------------------------------------------------------------- 動画一覧・正解CSV
-def video_root():
-    return Path(load_settings()['video_dir']).expanduser()
+def folders():
+    """{呼び名: フォルダのパス}"""
+    return {d['name']: Path(d['path']).expanduser() for d in load_settings()['video_dirs']}
 
 
-def list_videos():
-    root = video_root()
-    if not root.is_dir():
-        return []
-    vids = [p for p in root.rglob('*') if p.is_file() and p.suffix.lower() in VIDEO_EXTS
-            and not p.name.startswith('.')]
-    return sorted(str(p.relative_to(root)) for p in vids)
+def folder_of(video):
+    return video.partition('/')[0]
 
 
-def resolve_video(rel):
-    root = video_root().resolve()
+def list_videos(folder=None):
+    """登録したすべてのフォルダの動画。名前は「フォルダの呼び名/フォルダからの相対パス」"""
+    out = []
+    for name, root in folders().items():
+        if folder and name != folder or not root.is_dir():
+            continue
+        vids = [p for p in root.rglob('*') if p.is_file() and p.suffix.lower() in VIDEO_EXTS
+                and not p.name.startswith('.')]
+        out += [f'{name}/{p.relative_to(root)}' for p in vids]
+    return sorted(out)
+
+
+def resolve_video(video):
+    name, _, rel = video.partition('/')
+    root = folders().get(name)
+    if root is None or not rel:
+        abort(404)
+    root = root.resolve()
     path = (root / rel).resolve()
     if root not in path.parents or not path.is_file():
         abort(404)
@@ -133,7 +200,7 @@ def resolve_video(rel):
 
 
 def load_labels():
-    """正解CSV: video（単体文字フォルダからの相対パス）, label, updated_at"""
+    """正解CSV: video（フォルダの呼び名/フォルダからの相対パス）, label, updated_at"""
     if not LABELS_CSV.exists():
         return {}
     with open(LABELS_CSV, encoding='utf-8-sig', newline='') as f:
@@ -341,10 +408,11 @@ def all_results():
     return by_video
 
 
-def summary():
+def summary(folder=None):
+    """モデルごとの集計。folder を指定するとそのフォルダだけ、省略すると登録したすべてのフォルダ"""
     labels = load_labels()
     res = all_results()
-    videos = set(list_videos())
+    videos = set(list_videos(folder))
     table = {m['key']: {j: 0 for j in JUDGES} | {'未判定': 0} for m in MODEL_KINDS}
     confusions = {m['key']: {} for m in MODEL_KINDS}
     for v in videos:
@@ -364,6 +432,16 @@ def summary():
         out.append({'key': m['key'], 'name': m['name'], **t, 'サンプル数': n,
                     'rate': round(100 * t['正認識'] / n, 1) if n else None,
                     'confusions': sorted(confusions[m['key']].items(), key=lambda x: -x[1])[:10]})
+    return out
+
+
+def folder_breakdown():
+    """フォルダごとの認識率（モデルごと）"""
+    out = []
+    for name in folders():
+        s = summary(name)
+        out.append({'folder': name, 'videos': len(list_videos(name)),
+                    'models': {r['key']: {'サンプル数': r['サンプル数'], '正認識': r['正認識'], 'rate': r['rate']} for r in s}})
     return out
 
 
@@ -393,7 +471,10 @@ def reflect_to_experiment():
             for k in ['サンプル数', '正認識', '誤認識', '未検出']:
                 row['values'][names.index(k)] = str(item[k])
         note = (e['notes'] or '').rstrip()
-        stamp = f"[単体文字動画で集計 {datetime.now().isoformat(timespec='minutes')}] 正解入力済み {len(load_labels())} 本"
+        names = list(folders())
+        n_lab = sum(1 for v in list_videos() if load_labels().get(v))
+        stamp = (f"[単体文字動画で集計 {datetime.now().isoformat(timespec='minutes')}] "
+                 f"フォルダ {len(names)} 個（{'、'.join(names)}）, 正解入力済み {n_lab} 本")
         con.execute('UPDATE experiments SET columns=?, rows=?, status=?, notes=?, updated_at=? WHERE id=?',
                     (json.dumps(cols, ensure_ascii=False), json.dumps(rows, ensure_ascii=False),
                      '実施中' if e['status'] == '予定' else e['status'],
@@ -421,7 +502,7 @@ def api_videos():
     out = []
     for v in list_videos():
         info = video_info(v, labels, res.get(v, {}))
-        out.append({'video': v, 'label': info['label'], 'undetected': info['undetected'],
+        out.append({'video': v, 'folder': folder_of(v), 'label': info['label'], 'undetected': info['undetected'],
                     'recognized': any(x is not None for x in info['models'].values()),
                     'done': {k: (x['judge'] if x else None) for k, x in info['models'].items()}})
     return jsonify(out)
@@ -561,7 +642,8 @@ def api_override():
 
 @bp.route('/api/single/summary')
 def api_summary():
-    return jsonify(summary())
+    folder = request.args.get('folder') or None
+    return jsonify({'models': summary(folder), 'folders': folder_breakdown()})
 
 
 @bp.route('/api/single/reflect', methods=['POST'])
@@ -581,13 +663,13 @@ def api_export():
     res = all_results()
     buf = io.StringIO()
     w = csv.writer(buf)
-    head = ['video', 'label']
+    head = ['folder', 'video', 'label']
     for m in MODEL_KINDS:
         head += [f"{m['name']}_認識", f"{m['name']}_判定", f"{m['name']}_確率"]
     w.writerow(head)
     for v in list_videos():
         info = video_info(v, labels, res.get(v, {}))
-        row = [v, info['label']]
+        row = [folder_of(v), v, info['label']]
         for m in MODEL_KINDS:
             x = info['models'][m['key']]
             row += [x['predicted'], x['judge'] or '', x['top'][0][1] if x and x['top'] else ''] if x else ['', '', '']
