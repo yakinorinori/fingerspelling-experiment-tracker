@@ -94,12 +94,13 @@
     <div class="head">
       <h1>🎬 単体文字動画で認識</h1>
       <a class="back" href="/">← 実験記録に戻る</a>
+      <select id="folderSel" onchange="folderSel=this.value; renderList(); loadSummary()" style="margin-top:8px; width:100%; padding:4px; font-size:12px"></select>
       <div class="filters" id="filters"></div>
       <div class="counts" id="counts"></div>
     </div>
     <div id="videoList"></div>
     <div class="foot">
-      <button class="act secondary" id="batchBtn" onclick="batchRecognize()">まだ認識していない動画をまとめて認識</button>
+      <button class="act secondary" id="batchBtn" onclick="batchRecognize()">まだ認識していない動画をまとめて認識（選んだフォルダ）</button>
       <button class="act secondary" onclick="openSettings()">⚙ 設定（フォルダ・モデル）</button>
       <div class="msg" id="batchMsg"></div>
     </div>
@@ -143,7 +144,7 @@
     <div class="section-title">集計（モデルごと）</div>
     <div id="summary"></div>
     <div style="display:flex; gap:6px; margin-top:8px; flex-wrap: wrap;">
-      <button class="act" onclick="reflect()">📥 実験5の表に反映</button>
+      <button class="act" onclick="reflect()">📥 実験5の表に反映（全フォルダ合計）</button>
       <a class="act secondary" style="text-decoration:none; display:inline-block" href="/api/single/export.csv">📄 動画ごとの結果をCSVで保存</a>
     </div>
     <div class="msg" id="sumMsg"></div>
@@ -178,21 +179,30 @@ const FILTERS = {
   undet: ['未検出', v => v.undetected],
 };
 let videos = [], classes = [], classKinds = {}, settings = {};
-let cur = null, curInfo = null, filter = 'all', revealed = false, recognizing = false;
+let cur = null, curInfo = null, filter = 'all', revealed = false, recognizing = false, folderSel = '';
 const player = document.getElementById('player');
 
 /* ---------------- 一覧 ---------------- */
 async function loadVideos() {
   videos = await (await fetch('/api/single/videos')).json();
+  renderFolderSel();
   renderList();
 }
-function visible() { return videos.filter(FILTERS[filter][1]); }
+function inFolder(v) { return !folderSel || v.folder === folderSel; }
+function visible() { return videos.filter(v => inFolder(v) && FILTERS[filter][1](v)); }
+function renderFolderSel() {
+  const names = (settings.video_dirs || []).map(d => d.name);
+  if (folderSel && !names.includes(folderSel)) folderSel = '';
+  document.getElementById('folderSel').innerHTML = `<option value="">すべてのフォルダ（${videos.length} 本）</option>` +
+    names.map(n => `<option value="${esc(n)}" ${n === folderSel ? 'selected' : ''}>${esc(n)}（${videos.filter(v => v.folder === n).length} 本）</option>`).join('');
+}
 function renderList() {
   document.getElementById('filters').innerHTML = Object.entries(FILTERS).map(([k, [name, f]]) =>
-    `<button class="${k === filter ? 'on' : ''}" onclick="filter='${k}'; renderList()">${name} ${videos.filter(f).length}</button>`).join('');
-  const labeled = videos.filter(v => v.label).length;
+    `<button class="${k === filter ? 'on' : ''}" onclick="filter='${k}'; renderList()">${name} ${videos.filter(v => inFolder(v) && f(v)).length}</button>`).join('');
+  const inF = videos.filter(inFolder);
+  const labeled = inF.filter(v => v.label).length;
   document.getElementById('counts').textContent = videos.length
-    ? `動画 ${videos.length} 本 ／ 正解入力済み ${labeled} 本`
+    ? `動画 ${inF.length} 本 ／ 正解入力済み ${labeled} 本`
     : '動画が見つかりません。⚙設定で単体文字フォルダを確認してください';
   document.getElementById('videoList').innerHTML = visible().map(v => `
     <div class="vitem ${v.video === cur ? 'active' : ''}" onclick="openVideo('${encodeURIComponent(v.video)}')">
@@ -334,7 +344,7 @@ function updateListItem() {
 
 /* ---------------- まとめて認識 ---------------- */
 async function batchRecognize() {
-  const todo = videos.filter(v => !v.recognized);
+  const todo = videos.filter(v => !v.recognized && inFolder(v));
   const btn = document.getElementById('batchBtn');
   btn.disabled = true;
   let n = 0, fail = 0;
@@ -357,24 +367,34 @@ async function batchRecognize() {
 
 /* ---------------- 集計 ---------------- */
 async function loadSummary() {
-  const s = await (await fetch('/api/single/summary')).json();
-  let html = '<table><tr><th class="l">モデル</th><th>サンプル数</th><th>正認識</th><th>誤認識</th><th>未検出</th><th>認識率</th><th>対象外</th><th>未判定</th></tr>';
+  const d = await (await fetch('/api/single/summary' + (folderSel ? '?folder=' + encodeURIComponent(folderSel) : ''))).json();
+  const s = d.models;
+  let html = `<div class="hint" style="margin:0 0 4px">範囲: <b>${folderSel ? esc(folderSel) : 'すべてのフォルダを合わせた結果'}</b></div>`;
+  html += '<table><tr><th class="l">モデル</th><th>サンプル数</th><th>正認識</th><th>誤認識</th><th>未検出</th><th>認識率</th><th>対象外</th><th>未判定</th></tr>';
   s.forEach(r => html += `<tr><td class="l">${r.name}</td><td>${r['サンプル数']}</td><td>${r['正認識']}</td><td>${r['誤認識']}</td>
     <td>${r['未検出']}</td><td><b>${r.rate === null ? '－' : r.rate + '%'}</b></td><td>${r['対象外']}</td><td>${r['未判定']}</td></tr>`);
   html += '</table>';
   s.forEach(r => { if (r.confusions.length) html += `<div class="conf"><b>${r.name}</b> の誤認識: ${r.confusions.map(([k, n]) => `${esc(k)}×${n}`).join('、')}</div>`; });
+  if (d.folders.length > 1) {
+    html += '<div class="section-title">フォルダごとの認識率（正認識 / サンプル数）</div>';
+    html += '<table><tr><th class="l">フォルダ</th><th>動画</th>' + MODELS.map(m => `<th>${m.name.slice(0, 2)}</th>`).join('') + '</tr>';
+    d.folders.forEach(f => html += `<tr><td class="l">${esc(f.folder)}</td><td>${f.videos}</td>` + MODELS.map(m => {
+      const x = f.models[m.key];
+      return `<td>${x.rate === null ? '－' : x.rate + '%'}<br><span style="color:#889">${x['正認識']}/${x['サンプル数']}</span></td>`;
+    }).join('') + '</tr>');
+    html += '</table>';
+  }
   document.getElementById('summary').innerHTML = html;
 }
 async function reflect() {
   const res = await fetch('/api/single/reflect', {method: 'POST'});
   const d = await res.json();
-  if (res.ok) showMsg('sumMsg', '実験5の表に反映しました（実験記録の画面で確認・保存済み）', false);
+  if (res.ok) showMsg('sumMsg', 'すべてのフォルダを合わせた結果を、実験5の表に反映しました', false);
   else showMsg('sumMsg', d.error, true);
 }
 
 /* ---------------- 設定 ---------------- */
 const SETTING_FIELDS = [
-  ['video_dir', '単体文字フォルダ（この中の動画をすべて一覧にします。サブフォルダも含む）'],
   ['character_repo', 'fingerspelling-character のフォルダ（骨格・特徴量・モデルの読み込みに使う）'],
   ['static_model', '静止状態モデル（.joblib）'],
   ['dynamic_model', '動作状態モデル（.pt）'],
@@ -385,9 +405,23 @@ async function loadSettings() {
   settings = d.settings;
   return d;
 }
-async function openSettings() {
+let editDirs = [];
+async function openSettings(keepDirs) {
   const d = await loadSettings();
-  document.getElementById('settingsForm').innerHTML = SETTING_FIELDS.map(([k, label]) => `
+  if (!keepDirs) editDirs = d.settings.video_dirs.map(x => ({...x}));
+  const dirRows = editDirs.map((x, i) => `
+    <div style="display:flex; gap:6px; margin-bottom:5px; align-items:center">
+      <input type="text" style="width:130px" placeholder="呼び名" value="${esc(x.name)}" onchange="editDirs[${i}].name=this.value">
+      <input type="text" style="flex:1" placeholder="フォルダのパス" value="${esc(x.path)}" onchange="editDirs[${i}].path=this.value">
+      <span class="ok-mark ${d.ok.video_dirs[i] ? 'y' : 'n'}" style="white-space:nowrap">${i < d.ok.video_dirs.length ? (d.ok.video_dirs[i] ? '✓' : '✗ 見つかりません') : '（未保存）'}</span>
+      <button class="act secondary" onclick="editDirs.splice(${i}, 1); openSettings(true)">削除</button>
+    </div>`).join('');
+  document.getElementById('settingsForm').innerHTML = `
+    <div class="field"><label>単体文字フォルダ（複数登録すると、まとめて一覧・集計します。サブフォルダも含む。
+      呼び名は動画の名前の先頭に付き、正解と結果はこの呼び名で記録されます。一度付けた呼び名は変えないでください）</label>
+      ${dirRows}
+      <button class="act secondary" onclick="editDirs.push({name: '', path: ''}); openSettings(true)">＋ フォルダを追加</button></div>` +
+    SETTING_FIELDS.map(([k, label]) => `
     <div class="field"><label>${label}<span class="ok-mark ${d.ok[k] ? 'y' : 'n'}">${d.ok[k] ? '✓ 見つかりました' : '✗ 見つかりません'}</span></label>
       <input type="text" id="s_${k}" value="${esc(d.settings[k])}"></div>`).join('') + `
     <div class="field"><label><input type="checkbox" id="s_flip" ${d.settings.flip ? 'checked' : ''}> 左右反転してから骨格を取る（左右反転して撮った動画のとき）</label></div>
@@ -402,6 +436,7 @@ function closeSettings() { document.getElementById('settingsModal').classList.re
 async function saveSettings() {
   const body = {};
   SETTING_FIELDS.forEach(([k]) => body[k] = document.getElementById('s_' + k).value.trim());
+  body.video_dirs = editDirs;
   body.flip = document.getElementById('s_flip').checked;
   body.show_result = document.getElementById('s_show_result').value;
   await fetch('/api/single/settings', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
