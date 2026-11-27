@@ -483,6 +483,65 @@ def reflect_to_experiment():
         return e['id']
 
 
+def relink_records():
+    """
+    動画が見つからない記録（正解CSV・認識結果）を、登録したフォルダの動画に付け直す。
+    「呼び名/相対パス」の相対パスと同じ動画が、登録したフォルダのうちちょうど1つにあれば、その呼び名に直す。
+    付け直し先にすでに記録がある場合と、複数のフォルダに同じ相対パスがある場合は変えない（数だけ返す）。
+    """
+    roots = folders()
+    current = set(list_videos())
+
+    def target(key):
+        rel = key.partition('/')[2]
+        cands = [f'{n}/{rel}' for n, r in roots.items() if rel and (r / rel).is_file()]
+        return cands
+
+    stats = {'labels': 0, 'results': 0, 'ambiguous': 0, 'conflict': 0, 'missing': 0}
+    # 正解CSV
+    if LABELS_CSV.exists():
+        with open(LABELS_CSV, encoding='utf-8-sig', newline='') as f:
+            rows = list(csv.DictReader(f))
+        keys = {r['video'] for r in rows}
+        changed = False
+        for r in rows:
+            if r['video'] in current:
+                continue
+            cands = target(r['video'])
+            if len(cands) != 1:
+                stats['ambiguous' if cands else 'missing'] += 1
+                continue
+            if cands[0] in keys:
+                stats['conflict'] += 1
+                continue
+            keys.discard(r['video'])
+            keys.add(cands[0])
+            r['video'] = cands[0]
+            stats['labels'] += 1
+            changed = True
+        if changed:
+            with open(LABELS_CSV, 'w', encoding='utf-8-sig', newline='') as f:
+                w = csv.writer(f)
+                w.writerow(['video', 'label', 'updated_at'])
+                for r in sorted(rows, key=lambda r: r['video']):
+                    w.writerow([r['video'], r.get('label', ''), r.get('updated_at', '')])
+    # 認識結果
+    with db() as con:
+        videos = [r[0] for r in con.execute('SELECT DISTINCT video FROM single_char_results')]
+        have = set(videos)
+        for v in videos:
+            if v in current:
+                continue
+            cands = target(v)
+            if len(cands) != 1 or cands[0] in have:
+                continue
+            con.execute('UPDATE single_char_results SET video=? WHERE video=?', (cands[0], v))
+            have.discard(v)
+            have.add(cands[0])
+            stats['results'] += 1
+    return stats
+
+
 # ---------------------------------------------------------------- 画面・API
 @bp.route('/single')
 def page():
@@ -638,6 +697,11 @@ def api_override():
         con.execute('UPDATE single_char_results SET override=? WHERE video=? AND model=?',
                     (judge_, d['video'], d['model']))
     return jsonify(video_info(d['video']))
+
+
+@bp.route('/api/single/relink', methods=['POST'])
+def api_relink():
+    return jsonify(relink_records())
 
 
 @bp.route('/api/single/summary')
