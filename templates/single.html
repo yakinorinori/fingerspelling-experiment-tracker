@@ -71,7 +71,7 @@
   .act { padding: 6px 12px; border: 1px solid #4a7bd0; background: #4a7bd0; color: #fff; border-radius: 5px; cursor: pointer; font-size: 12px; }
   .act.secondary { background: #fff; color: #4a7bd0; }
   .act:disabled { opacity: .5; cursor: default; }
-  .msg { font-size: 12px; margin-top: 6px; min-height: 16px; }
+  .msg { font-size: 12px; margin-top: 6px; min-height: 16px; white-space: pre-wrap; }
   .msg.err { color: #c0392b; white-space: pre-wrap; }
   .msg.ok { color: #1b6e2e; }
 
@@ -440,6 +440,7 @@ async function saveSettings() {
   body.flip = document.getElementById('s_flip').checked;
   body.show_result = document.getElementById('s_show_result').value;
   await fetch('/api/single/settings', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  await relink();
   await openSettings();
   await Promise.all([loadVideos(), loadClasses()]);
   loadSummary();
@@ -457,8 +458,19 @@ document.addEventListener('keydown', e => {
 function showMsg(id, text, err) { const el = document.getElementById(id); el.textContent = text; el.className = 'msg ' + (err ? 'err' : 'ok'); }
 function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+async function relink() {
+  const r = await (await fetch('/api/single/relink', {method: 'POST'})).json();
+  const parts = [];
+  if (r.labels || r.results) parts.push(`記録を付け直しました（正解 ${r.labels} 件、認識結果 ${r.results} 本）`);
+  if (r.missing) parts.push(`動画が見つからない正解が ${r.missing} 件あります（そのフォルダを⚙設定で登録すると表示されます）`);
+  if (r.ambiguous) parts.push(`同じ名前の動画が複数のフォルダにあり付け直せない正解が ${r.ambiguous} 件`);
+  if (r.conflict) parts.push(`付け直し先にすでに正解があるもの ${r.conflict} 件`);
+  if (parts.length) showMsg('batchMsg', parts.join('\n'), !!(r.missing || r.ambiguous || r.conflict));
+}
+
 (async () => {
   const d = await loadSettings();
+  await relink();
   await Promise.all([loadVideos(), loadClasses()]);
   loadSummary();
   if (!d.ok.video_dir || !d.ok.character_repo) openSettings();
