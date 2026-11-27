@@ -478,12 +478,22 @@ def api_label():
 
 @bp.route('/api/single/override', methods=['PUT'])
 def api_override():
+    """
+    判定を手で修正する。「正認識」を選んだときは、そのモデルが認識した文字を正解にする
+    （正解が決まれば、ほかのモデルも自動で判定し直される。そのモデル自身は自動判定で正認識になる）
+    """
     d = request.json or {}
     if d.get('judge') and d['judge'] not in JUDGES:
         abort(400)
+    judge_ = d.get('judge') or ''
+    if judge_ == '正認識':
+        r = get_results(d['video']).get(d['model'])
+        if r and r['predicted']:
+            save_label(d['video'], r['predicted'])
+            judge_ = ''                       # 正解＝認識結果になったので自動判定に任せる
     with db() as con:
         con.execute('UPDATE single_char_results SET override=? WHERE video=? AND model=?',
-                    (d.get('judge') or '', d['video'], d['model']))
+                    (judge_, d['video'], d['model']))
     return jsonify(video_info(d['video']))
 
 

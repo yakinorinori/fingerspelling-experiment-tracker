@@ -131,7 +131,7 @@
       <button class="act secondary" onclick="setLabel('')">正解を消す</button>
     </div>
     <div class="palette" id="palette"></div>
-    <div class="hint">キー操作: Space=もう一度再生 ／ ← →=前・次の動画 ／ 1〜3=静止・動作・統一の判定を自動に戻す</div>
+    <div class="hint">認識結果の「正認識」を押すと、そのモデルが認識した文字が正解になります（全モデルが間違えたときだけ、ここで正解を入れてください）<br>キー操作: Space=もう一度再生 ／ ← →=前・次の動画 ／ 1〜3=静止・動作・統一の判定を自動に戻す</div>
   </div>
 
   <!-- 右: 認識結果と集計 -->
@@ -311,7 +311,7 @@ function renderResults() {
 async function setOverride(model, judge) {
   curInfo = await (await fetch('/api/single/override', {method: 'PUT', headers: {'Content-Type': 'application/json'},
                                                          body: JSON.stringify({video: cur, model, judge})})).json();
-  renderResults(); updateListItem();
+  renderLabel(); renderResults(); updateListItem();     // 正認識なら正解もその文字になる
 }
 async function rerun() {
   recognizing = true; renderResults();
