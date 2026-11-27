@@ -8,3 +8,4 @@ venv/
 data/single_char_settings.json
 data/single_char_landmarks/
 data/single_char_results.csv
+data/single_char_playback/

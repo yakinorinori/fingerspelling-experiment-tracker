@@ -56,7 +56,10 @@ pip install flask
 python app.py        # http://127.0.0.1:5002/single
 ```
 
-動画が再生されないときは Safari で開く（iPhone の HEVC 動画は Chrome で再生できないことがある）。
+OpenCV の `VideoWriter`（fourcc `mp4v`）で書き出した動画は MPEG-4 Part 2 という形式で、ブラウザでは再生できない。
+その場合はアプリが自動で H.264 に変換して再生する（`data/single_char_playback/` に保存。元の動画は変えず、認識には元の動画を使う）。
+変換には ffmpeg を使うので、入っていなければ `pip install imageio-ffmpeg` を実行する。
+iPhone の HEVC 動画は Chrome で再生できないことがあるので、そのときは Safari で開く。
 
 ## 初期登録されている実験
 

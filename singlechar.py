@@ -31,6 +31,7 @@ DATA_DIR = BASE_DIR / 'data'
 SETTINGS_PATH = DATA_DIR / 'single_char_settings.json'
 LABELS_CSV = DATA_DIR / 'single_char_labels.csv'
 LANDMARK_CACHE = DATA_DIR / 'single_char_landmarks'
+PLAYBACK_CACHE = DATA_DIR / 'single_char_playback'     # ブラウザで再生できない動画を H.264 に変換したもの
 DB_PATH = DATA_DIR / 'experiments.db'
 
 VIDEO_EXTS = {'.mp4', '.mov', '.avi', '.m4v', '.mkv'}
@@ -446,9 +447,70 @@ def api_classes():
     return jsonify({'classes': classes, 'kinds': kinds})
 
 
+# ブラウザ（Safari・Chrome）の <video> で再生できる映像の形式
+BROWSER_CODECS = {'avc1', 'h264', 'hvc1', 'hev1', 'vp09', 'vp08', 'av01'}
+
+
+def video_codec(path):
+    """OpenCV で読んだ映像の形式（fourcc）。例: 'avc1'（H.264）, 'FMP4'（MPEG-4 Part 2 = OpenCV の 'mp4v'）"""
+    import cv2
+    cap = cv2.VideoCapture(str(path))
+    code = int(cap.get(cv2.CAP_PROP_FOURCC))
+    cap.release()
+    return code.to_bytes(4, 'little').decode('ascii', 'replace').strip('\x00 ')
+
+
+def ffmpeg_exe():
+    import shutil
+    exe = shutil.which('ffmpeg')
+    if exe:
+        return exe
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except ImportError:
+        return None
+
+
+def playable_video(path):
+    """
+    ブラウザで再生できる動画のパスを返す。
+    OpenCV の VideoWriter（fourcc 'mp4v'）で書き出した動画は MPEG-4 Part 2 という形式で、ブラウザでは再生できない。
+    その場合は H.264 に変換して data/single_char_playback/ に保存し、そちらを返す（元の動画は変えない。認識には元の動画を使う）
+    """
+    codec = video_codec(path).lower()
+    if codec in BROWSER_CODECS:
+        return path
+    st = path.stat()
+    key = hashlib.md5(f'{path}|{st.st_size}|{st.st_mtime}'.encode()).hexdigest()
+    out = PLAYBACK_CACHE / f'{key}.mp4'
+    if out.exists():
+        return out
+    exe = ffmpeg_exe()
+    if exe is None:
+        raise RuntimeError(f'この動画は形式（{codec}）のためブラウザで再生できません。'
+                           '変換に ffmpeg を使うので、pip install imageio-ffmpeg を実行してください')
+    import subprocess
+    PLAYBACK_CACHE.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix('.tmp.mp4')
+    # 幅・高さを偶数にそろえる（H.264 の yuv420p は奇数の大きさを扱えない）
+    cmd = [exe, '-v', 'error', '-y', '-i', str(path), '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+           '-pix_fmt', 'yuv420p', '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-movflags', '+faststart', str(tmp)]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode != 0:
+        raise RuntimeError(f'H.264 への変換に失敗しました: {res.stderr.strip()[-300:]}')
+    tmp.replace(out)
+    return out
+
+
 @bp.route('/api/single/video')
 def api_video_file():
-    return send_file(resolve_video(request.args.get('path', '')), conditional=True)
+    path = resolve_video(request.args.get('path', ''))
+    try:
+        return send_file(playable_video(path), mimetype='video/mp4' if path.suffix.lower() != '.mov' else None,
+                         conditional=True)
+    except RuntimeError as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @bp.route('/api/single/info')
